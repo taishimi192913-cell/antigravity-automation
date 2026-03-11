@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>さくらちゃんねる - ライブ配信</title>
+    <!-- Three.jsとVRMをブラウザ上で実行するためのインポートマップ -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/",
+            "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.1.2/lib/three-vrm.module.js"
+        }
+    }
+    </script>
+    <style>
+        body {
+            margin: 0;
+            background: #111;
+            color: #fff;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 背景全体の映像エリア（配信画面） */
+        #video-area {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            /* 着物に合う、昔の日本の感じ（少しモダンな和室）の背景 */
+            background: url('/static/japanese_room.png') center/cover;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        /* 映像エリアにわずかなぼかしをかける（アバターを目立たせるため、暗くはしない） */
+        #video-area::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.05);
+            /* ほとんど透明で少しだけ明るく */
+            backdrop-filter: blur(2px);
+            z-index: 0;
+        }
+
+        /* ライブ配信マーク */
+        #status-indicator {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-weight: bold;
+            background: #e62117;
+            padding: 6px 12px;
+            border-radius: 4px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background: #fff;
+            border-radius: 50%;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        /* 3D VTuberアバター用キャンバス */
+        #vrm-canvas {
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            filter: drop-shadow(0 0 30px rgba(255, 71, 126, 0.4));
+            outline: none;
+        }
+
+        /* 字幕エリア */
+        #subtitle-container {
+            position: absolute;
+            bottom: 50px;
+            left: 10%;
+            right: 10%;
+            z-index: 10;
+            display: none;
+            text-align: center;
+        }
+
+        #subtitle {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 22px;
+            font-weight: bold;
+            color: #ffb3c6;
+            border: 1px solid #ff477e;
+            display: inline-block;
+            max-width: 100%;
+        }
+
+        /* 背景に同化させた右側のチャットエリア */
+        #chat-area {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            bottom: 20px;
+            width: 350px;
+            background: rgba(20, 5, 10, 0.4);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 71, 126, 0.3);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+            /* チャット欄が絶対に前面に来るように数値を大幅にアップ */
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        .chat-header {
+            padding: 15px;
+            background: rgba(255, 71, 126, 0.15);
+            border-bottom: 1px solid rgba(255, 71, 126, 0.3);
+            font-weight: bold;
+            font-size: 18px;
+            letter-spacing: 1px;
+            text-align: center;
+        }
+
+        /* ピックアップされた質問（回答中）の吹き出し（左中央に配置） */
+        #picked-comment-container {
+            position: absolute;
+            top: 50%;
+            left: 200px;
+            /* 左側のメニューに被らない位置 */
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.85);
+            color: #333;
+            padding: 20px 25px;
+            border-radius: 20px;
+            border: 2px solid #ff477e;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            width: 320px;
+            /* 長文質問が入るように幅を広く確保 */
+            word-wrap: break-word;
+            /* 長文を複数行に自動で折り返す */
+            line-height: 1.5;
+            z-index: 150;
+            display: none;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        /* 吹き出しの尻尾（右側のさくらちゃんに向かって突き出す） */
+        #picked-comment-container::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: -15px;
+            transform: translateY(-50%);
+            border-width: 15px 0 15px 15px;
+            border-style: solid;
+            border-color: transparent transparent transparent #ff477e;
+        }
+
+        #chat-history {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .msg-box {
+            font-size: 14px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .msg-name {
+            color: #aaa;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+
+        .msg-content {
+            background: rgba(40, 40, 40, 0.6);
+            backdrop-filter: blur(4px);
+            padding: 10px 14px;
+            border-radius: 8px;
+            display: inline-block;
+        }
+
+        /* AIのメッセージは見ためを変える（スパチャ風、モデレーター風） */
+        .msg-ai .msg-name {
+            color: #ff477e;
+            font-weight: bold;
+        }
+
+        .msg-ai .msg-content {
+            background: #381a25;
+            border: 1px solid #ff477e;
+        }
+
+        /* 入力欄 */
+        #input-area {
+            padding: 15px;
+            border-top: 1px solid rgba(255, 71, 126, 0.3);
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+
+        input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 20px;
+            border: 1px solid #444;
+            background: #111;
+            color: white;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: #ff477e;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #ff477e;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #e03264;
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        #loading {
+            display: none;
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        /* 左側のサイドナビゲーションメニュー */
+        #side-menu {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 20;
+        }
+
+        .menu-item {
+            background: rgba(20, 5, 10, 0.5);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 71, 126, 0.4);
+            color: #ffb3c6;
+            padding: 12px 25px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(255, 71, 126, 0.2);
+            letter-spacing: 2px;
+        }
+
+        .menu-item:hover {
+            background: rgba(255, 71, 126, 0.6);
+            color: #fff;
+            box-shadow: 0 0 15px rgba(255, 71, 126, 0.8);
+            transform: translateX(10px);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- 左側のメニューバー（しずくを意識したUI） -->
+    <div id="side-menu">
+        <div class="menu-item">けんさく</div>
+        <div class="menu-item">ざつだん</div>
+        <div class="menu-item">ゲーム</div>
+        <div class="menu-item">投げ銭</div>
+        <div class="menu-item">ゴミ箱</div>
+    </div>
+
+    <!-- 配信画面エリア -->
+    <div id="video-area">
+        <div id="status-indicator">
+            <div class="dot"></div> LIVE
+        </div>
+
+        <!-- 回答中の質問をピックアップ表示する吹き出し -->
+        <div id="picked-comment-container">
+            <span style="color:#ff477e; font-size:14px; margin-right:8px;">▶ 質問・コメント</span>
+            <div id="picked-comment-text" style="margin-top: 5px;"></div>
+        </div>
+
+        <!-- 完全な3D空間（Canvas）に切り替え -->
+        <canvas id="vrm-canvas"></canvas>
+
+        <!-- 字幕（話している内容が表示される） -->
+        <div id="subtitle-container">
+            <div id="subtitle"></div>
+        </div>
+    </div>
+
+    <!-- YouTube風チャット欄 -->
+    <div id="chat-area">
+        <div class="chat-header">Comments</div>
+        <div id="chat-history">
+            <!-- コメントはここに追加されていきます -->
+        </div>
+
+        <div id="input-area">
+            <div class="input-wrapper">
+                <input type="text" id="chat-input" placeholder="チャットを入力..."
+                    onkeypress="if(event.key === 'Enter') sendChat()">
+                <button id="send-btn" onclick="sendChat()">送信</button>
+            </div>
+            <div id="loading">さくらが思考中...（音声生成待ち）</div>
+        </div>
+    </div>
+
+    <script>
+        const chatHistory = document.getElementById('chat-history');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const subtitleCont = document.getElementById('subtitle-container');
+        const subtitle = document.getElementById('subtitle');
+        const pickedCommentCont = document.getElementById('picked-comment-container');
+        const pickedCommentText = document.getElementById('picked-comment-text');
+        const loading = document.getElementById('loading');
+
+        // VRM側に話していることや感情を伝えるインターフェース
+        window.vrmApp = {
+            isTalking: false,
+            currentEmotion: 'neutral'
+        };
+
+        function startLipSync() {
+            window.vrmApp.isTalking = true;
+        }
+
+        function stopLipSync() {
+            window.vrmApp.isTalking = false;
+        }
+
+        async function sendChat() {
+            const text = chatInput.value.trim();
+            if (!text) return;
+
+            // 自分のコメントを画面に追加
+            addBubble('ご主人様', text, false);
+            chatInput.value = '';
+
+            // 回答対象のコメントを画面上部にピックアップ表示
+            pickedCommentText.innerText = text;
+            pickedCommentCont.style.display = 'block';
+
+            // UIをロックして処理中表示
+            chatInput.disabled = true;
+            sendBtn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+                // ローカルサーバーの /chat にPOSTリクエスト
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+
+                // AIの返答テキストを追加
+                addBubble('さくら', data.text, true);
+
+                // 字幕をセットして表示
+                subtitle.innerText = data.text;
+                subtitleCont.style.display = 'block';
+
+                // 取得した感情を3D描画システム側に伝える
+                window.vrmApp.currentEmotion = data.emotion || 'neutral';
+
+                // 音声の再生
+                if (data.audio) {
+                    const audio = new Audio(data.audio);
+
+                    // 再生開始時にアバターをピョコピョコさせる（喋ってる感）と口パク
+                    audio.onplay = () => { startLipSync(); };
+
+                    // 再生終了時にアニメーションを止めて字幕と質問箱を消す
+                    audio.onended = () => {
+                        stopLipSync();
+                        subtitleCont.style.display = 'none';
+                        pickedCommentCont.style.display = 'none';
+                    };
+
+                    audio.play();
+                } else {
+                    // 音声が無い場合は2秒後に字幕と質問箱を消す
+                    setTimeout(() => {
+                        subtitleCont.style.display = 'none';
+                        pickedCommentCont.style.display = 'none';
+                    }, 2000);
+                }
+            } catch (err) {
+                console.error(err);
+                addBubble('System', 'エラーが発生しました', false);
+            }
+
+            // UIのロックを解除
+            loading.style.display = 'none';
+            chatInput.disabled = false;
+            sendBtn.disabled = false;
+            chatInput.focus();
+        }
+
+        function addBubble(name, text, isAi) {
+            const box = document.createElement('div');
+            box.className = 'msg-box ' + (isAi ? 'msg-ai' : '');
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'msg-name';
+            nameEl.innerText = name;
+
+            const contentEl = document.createElement('div');
+            contentEl.className = 'msg-content';
+            contentEl.innerText = text;
+
+            box.appendChild(nameEl);
+            box.appendChild(contentEl);
+
+            chatHistory.appendChild(box);
+
+            // 常に最新のコメントへスクロール
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+    </script>
+
+    <!-- 3Dモデル (VRM) 描画・制御用スクリプト -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+
+        const canvas = document.getElementById('vrm-canvas');
+        const videoArea = document.getElementById('video-area');
+
+        // レンダラーの設定（背景透過）
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+        renderer.setSize(videoArea.clientWidth, videoArea.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        // 【着席感の演出 ＆ 頭が見切れない調整】
+        // 椅子に座っている状態を想定し、カメラの高さを胸〜首の高さ(1.15)にし、
+        // 頭から帯のあたりまでが綺麗に収まるように距離(1.8)を設定
+        const camera = new THREE.PerspectiveCamera(35.0, videoArea.clientWidth / videoArea.clientHeight, 0.1, 20.0);
+        camera.position.set(0.0, 1.15, 1.8);
+
+        const scene = new THREE.Scene();
+
+        // 照明（可愛く見えるように正面と斜め上に強めのライト）
+        const light = new THREE.DirectionalLight(0xffffff, Math.PI);
+        light.position.set(1.0, 1.0, 1.0).normalize();
+        scene.add(light);
+
+        const amLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(amLight);
+
+        let currentVrm = undefined;
+
+        // VRM読み込み処理
+        const loader = new GLTFLoader();
+        loader.crossOrigin = 'anonymous';
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+
+        loader.load(
+            '/static/sakura.vrm',
+            (gltf) => {
+                const vrm = gltf.userData.vrm;
+
+                // 不要なジョイントなどを削除して処理を軽量化
+                VRMUtils.removeUnnecessaryVertices(gltf.scene);
+                VRMUtils.removeUnnecessaryJoints(gltf.scene);
+
+                // キャラクターをカメラの正面に向ける
+                vrm.scene.rotation.y = Math.PI;
+
+                // 【重要】椅子に座るポーズ（Sitting Pose）を作成
+                const leftUpperArm = vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+                const leftLowerArm = vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+                const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+                const leftUpperLeg = vrm.humanoid.getNormalizedBoneNode('leftUpperLeg');
+                const rightUpperLeg = vrm.humanoid.getNormalizedBoneNode('rightUpperLeg');
+                const leftLowerLeg = vrm.humanoid.getNormalizedBoneNode('leftLowerLeg');
+                const rightLowerLeg = vrm.humanoid.getNormalizedBoneNode('rightLowerLeg');
+
+                // 脚を曲げて座る
+                if (leftUpperLeg) leftUpperLeg.rotation.x = 1.4;
+                if (rightUpperLeg) rightUpperLeg.rotation.x = 1.4;
+                if (leftLowerLeg) leftLowerLeg.rotation.x = -1.4;
+                if (rightLowerLeg) rightLowerLeg.rotation.x = -1.4;
+
+                // 腕を下ろし、少し前方の膝元へ置くようなリラックスした姿勢
+                if (leftUpperArm) { leftUpperArm.rotation.z = 1.0; leftUpperArm.rotation.x = 0.2; }
+                if (rightUpperArm) { rightUpperArm.rotation.z = -1.0; rightUpperArm.rotation.x = 0.2; }
+                if (leftLowerArm) { leftLowerArm.rotation.x = -0.3; leftLowerArm.rotation.z = -0.2; }
+                if (rightLowerArm) { rightLowerArm.rotation.x = -0.3; rightLowerArm.rotation.z = 0.2; }
+
+                // 体全体を椅子に座っている高さまで下げる
+                vrm.scene.position.y = -0.4;
+
+                scene.add(vrm.scene);
+                currentVrm = vrm;
+
+                console.log("🌸 さくらちゃん(3D)の召喚に成功しました！");
+            },
+            (progress) => console.log('Loading 3D Model...', 100.0 * (progress.loaded / progress.total), '%'),
+            (error) => console.error(error)
+        );
+
+        const clock = new THREE.Clock();
+
+        // 待機時のランダムモーション用ステート
+        let idleActionTime = 0;
+        let isFidgeting = false;
+        let fidgetPhase = 0; // 0: 待機, 1: 腕を上げる, 2: かく, 3: 腕を下ろす
+
+        // 毎フレームごとのアニメーションループ
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+
+            if (currentVrm) {
+                const time = clock.elapsedTime;
+
+                // 1. 自動またばき（不定期にパチパチさせる）
+                // 周期的なサイン波を利用し、特定のタイミングだけまぶたを閉じる
+                const blink = Math.sin(time * 3) > 0.98 ? 1 : 0;
+                currentVrm.expressionManager.setValue('blink', blink);
+
+                // 2. リップシンク（音声再生中のみモゴモゴさせる）
+                if (window.vrmApp && window.vrmApp.isTalking) {
+                    const mouthAmount = Math.random() > 0.4 ? (Math.random() * 0.7 + 0.3) : 0.0;
+                    currentVrm.expressionManager.setValue('aa', mouthAmount);
+                } else {
+                    currentVrm.expressionManager.setValue('aa', 0);
+                    currentVrm.expressionManager.setValue('ih', 0);
+                }
+
+                // --- 感情に基づく表情（表情モーフ）の適応 ---
+                const emo = (window.vrmApp.currentEmotion || 'neutral').toLowerCase();
+
+                // 全ての表情を一度リセット
+                ['happy', 'angry', 'sad', 'relaxed', 'neutral'].forEach(e => currentVrm.expressionManager.setValue(e, 0));
+
+                // 対応する表情を適用
+                if (emo.includes('happy')) currentVrm.expressionManager.setValue('happy', 1);
+                else if (emo.includes('angry')) currentVrm.expressionManager.setValue('angry', 1);
+                else if (emo.includes('sad')) currentVrm.expressionManager.setValue('sad', 1);
+                else if (emo.includes('fun')) currentVrm.expressionManager.setValue('relaxed', 1);
+                else if (emo.includes('asmr')) currentVrm.expressionManager.setValue('relaxed', 1); // ASMR時はリラックス顔
+                else currentVrm.expressionManager.setValue('neutral', 1);
+
+                // --- 揺れの表現と感情に合わせたジェスチャー（身振り手振り） ---
+                const rightUpperArm = currentVrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+                const leftUpperArm = currentVrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rightLowerArm = currentVrm.humanoid.getNormalizedBoneNode('rightLowerArm');
+                const leftLowerArm = currentVrm.humanoid.getNormalizedBoneNode('leftLowerArm');
+
+                if (window.vrmApp && window.vrmApp.isTalking) {
+                    // 座ったままの基準高さを維持
+                    currentVrm.scene.position.y = -0.4;
+
+                    // 感情によって身振り手振りを変える
+                    if (emo.includes('happy') || emo.includes('fun')) {
+                        // 嬉しい時：体を大きく揺らし、両手を僅かに浮かせる（デレデレ）
+                        currentVrm.scene.rotation.y = Math.PI + Math.sin(time * 3.0) * 0.08;
+                        currentVrm.scene.rotation.z = Math.sin(time * 2.0) * 0.06;
+                        if (rightUpperArm) rightUpperArm.rotation.z = -1.0 + (Math.sin(time * 4) * 0.1);
+                        if (leftUpperArm) leftUpperArm.rotation.z = 1.0 - (Math.sin(time * 4) * 0.1);
+                    } else if (emo.includes('angry')) {
+                        // 怒っている時：前のめりになり、体を固定（圧をかける）
+                        currentVrm.scene.rotation.y = Math.PI;
+                        currentVrm.scene.rotation.z = 0.05; // 睨みつけるような角度
+                        if (rightUpperArm) rightUpperArm.rotation.z = -1.4; // 腕をピシッと下ろす
+                        if (leftUpperArm) leftUpperArm.rotation.z = 1.4;
+                    } else if (emo.includes('sad')) {
+                        // 悲しい時：うつむき加減になり、小刻みに震える
+                        currentVrm.scene.rotation.y = Math.PI + Math.sin(time * 10.0) * 0.01;
+                        currentVrm.scene.rotation.z = -0.05;
+                        if (rightUpperArm) rightUpperArm.rotation.z = -1.3;
+                        if (leftUpperArm) leftUpperArm.rotation.z = 1.3;
+                    } else if (emo.includes('asmr')) {
+                        // ASMR時：顔をグッとカメラ（マイク）に近づけて、体を傾けて囁く
+                        currentVrm.scene.rotation.y = Math.PI - 0.2; // 少し体を斜めにする
+                        currentVrm.scene.rotation.z = 0.1; // 首をコテンと傾ける
+                        currentVrm.scene.position.y = -0.3; // 身を乗り出す分、少し高さを上げる
+                        currentVrm.scene.position.z = 0.5; // カメラ側に大きく近づく（Z軸移動）
+                        if (rightUpperArm) rightUpperArm.rotation.z = -1.0;
+                        if (leftUpperArm) leftUpperArm.rotation.z = 1.0;
+                    } else {
+                        // 通常の会話：自然な横揺れ
+                        currentVrm.scene.position.z = 0; // 近づいた体を元に戻す
+                        currentVrm.scene.rotation.y = Math.PI + Math.sin(time * 2.0) * 0.06;
+                        currentVrm.scene.rotation.z = Math.sin(time * 1.5) * 0.04;
+                        if (rightUpperArm) rightUpperArm.rotation.z = -1.2;
+                        if (leftUpperArm) leftUpperArm.rotation.z = 1.2;
+                    }
+
+                    // ランダム仕草をリセット
+                    if (rightLowerArm) rightLowerArm.rotation.x = 0;
+                    isFidgeting = false;
+                } else {
+                    // 待機中は完全に静止させる（座ったポーズを維持）
+                    currentVrm.scene.position.y = -0.4;
+                    currentVrm.scene.position.z = 0; // カメラへの接近をリセット
+                    currentVrm.scene.rotation.y = Math.PI; // 正面を向く
+                    currentVrm.scene.rotation.z = 0;
+
+                    // 腕も初期の膝に置いた状態に固定
+                    if (rightUpperArm) { rightUpperArm.rotation.z = -1.0; rightUpperArm.rotation.x = 0.2; }
+                    if (leftUpperArm) { leftUpperArm.rotation.z = 1.0; leftUpperArm.rotation.x = 0.2; }
+                    if (rightLowerArm) { rightLowerArm.rotation.x = -0.3; rightLowerArm.rotation.z = 0.2; }
+                    if (leftLowerArm) { leftLowerArm.rotation.x = -0.3; leftLowerArm.rotation.z = -0.2; }
+
+                    isFidgeting = false; // ランダムフラグも確実にオフにする
+                }
+
+                // VRMモデルの更新
+                currentVrm.update(deltaTime);
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+
+</html>

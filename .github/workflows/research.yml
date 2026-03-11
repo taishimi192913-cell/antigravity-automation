@@ -1,0 +1,40 @@
+name: AI VTuber Auto Research & Generation
+
+on:
+  schedule:
+    - cron: '0 23 * * *' # 日本時間の毎日朝8:00に自動実行
+  workflow_dispatch: # GitHubの画面から手動ボタンで実行可能にする設定
+
+jobs:
+  research-and-generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. コードの取得 (Checkout)
+        uses: actions/checkout@v4
+
+      - name: 2. Python環境のセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 3. 必要なライブラリのインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests bs4 yt-dlp openai duckduckgo_search playwright
+          # 画面なしブラウザ（Playwright）のインストール（Webスクレイピングに必須）
+          playwright install chromium
+
+      - name: 4. リサーチ＆自動生成スクリプトの実行
+        env:
+          # ここに設定したAPIキーがスクリプト内で `os.environ.get("OPENAI_API_KEY")` のように使われます
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          # リアルタイムのログ出力設定
+          PYTHONUNBUFFERED: "1"
+        run: |
+          # フォルダを移動してスクリプトを実行
+          cd enoshima-reel
+          python fetch_videos.py
+          
+      # 今後、生成した動画を自動アップロードするNode.jsのステップなどをここに追加します
