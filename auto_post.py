@@ -8,21 +8,26 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # ==========================================
-# 1. 各種設定（APIキーなどをここに入力します）
+# 1. Configuration
 # ==========================================
 
-# --- Google Drive の設定 ---
+# --- Google Drive settings ---
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-DRIVE_FOLDER_ID = '1EAy5zG828wOdHoxVs3cGt-k8GB6hQrp_' # 自動投稿用動画、2026、0305
+DRIVE_FOLDER_ID = os.environ.get('DRIVE_FOLDER_ID', '')
 
-# --- Instagram (Meta Graph API) の設定 ---
-IG_ACCESS_TOKEN = 'ここにInstagram Graph APIのアクセストークンを入れます'
-IG_ACCOUNT_ID = 'ここにInstagramのアカウントIDを入れます'
+# --- Instagram (Meta Graph API) settings ---
+IG_ACCESS_TOKEN = os.environ.get('IG_ACCESS_TOKEN', '')
+IG_ACCOUNT_ID = os.environ.get('IG_ACCOUNT_ID', '')
 
 # ==========================================
+
+def require_env(name, value):
+    if not value:
+        raise RuntimeError(f"{name} is not set")
+    return value
 
 def upload_to_drive(file_path, file_name):
-    """Google Driveに動画をアップロードする関数"""
+    """Upload a video to Google Drive."""
     print(f"Google Driveへのアップロードを開始します: {file_name}")
     creds = None
     # 既存のトークンがあれば読み込む
@@ -56,7 +61,9 @@ def upload_to_drive(file_path, file_name):
     return file.get('id')
 
 def post_to_instagram(video_url, caption):
-    """Instagramに動画(Reels)をアップロードして投稿する関数"""
+    """Upload and publish a video as an Instagram Reel."""
+    require_env('IG_ACCESS_TOKEN', IG_ACCESS_TOKEN)
+    require_env('IG_ACCOUNT_ID', IG_ACCOUNT_ID)
     print(f"Instagramへの投稿を開始します...")
     
     # 1. 動画のコンテナ（投稿の準備枠）を作成
@@ -101,24 +108,24 @@ def post_to_instagram(video_url, caption):
     publish_result = publish_res.json()
     
     if 'id' in publish_result:
-        print("🎉 Instagramへの投稿が完了しました！")
+        print("Instagramへの投稿が完了しました！")
     else:
         print("エラー: 投稿の公開に失敗しました:", publish_result)
 
 if __name__ == "__main__":
     # --- 実行する動画の設定 ---
     VIDEO_PATH = 'sora_generated_video.mp4' # 自動生成された動画のパス
-    FILE_NAME = 'My_AI_Generated_Video.mp4'
-    CAPTION = 'Soraで生成した動画です！ #自動投稿 #AI #Sora'
+    CAPTION = "AIで生成した動画を自動投稿しました！ #AI #自動化"
     
-    # Instagramはインターネット上のURLから動画を取得するため、公開されたURLが必要です。
-    # ※ 実際には自身のサーバーなどに置かれた動画のURLを指定します。
-    PUBLIC_VIDEO_URL = 'ここに動画の公開URLを入れます'
-
-    # 1. Google Driveに保存
-    upload_to_drive(VIDEO_PATH, FILE_NAME)
-    
-    # 2. Instagramに投稿
-    # post_to_instagram(PUBLIC_VIDEO_URL, CAPTION)
-    
-    print("APIキーなどの設定が完了したら、コメントアウトを外して実行してください。")
+    if not os.path.exists(VIDEO_PATH):
+        print(f"エラー: 動画ファイルが見つかりません: {VIDEO_PATH}")
+    else:
+        # 1. Google Driveにアップロード
+        file_id = upload_to_drive(VIDEO_PATH, os.path.basename(VIDEO_PATH))
+        
+        # 2. 共有リンクを作成（本来は権限設定が必要）
+        # 注意: Instagramからアクセスできる公開URLが必要です
+        video_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        
+        # 3. Instagramに投稿
+        post_to_instagram(video_url, CAPTION)
