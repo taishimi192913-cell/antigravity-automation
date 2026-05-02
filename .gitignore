@@ -6,4 +6,20 @@ __pycache__/
 .DS_Store
 node_modules/
 out/
+
+# Local environment and secrets
 .env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+credentials.json
+client_secret*.json
+token.json
+*.pem
+*.key
+*.p12
+
+# Local tool output
+*.log
+*.bak
